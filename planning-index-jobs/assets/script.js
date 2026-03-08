@@ -1,277 +1,353 @@
 /**
- * Planning Index Jobs – Interactive Dashboard
- * Handles search, filtering, stat counters, progress bar animations, and mobile labels.
+ * PlanningIndex Jobs - Interactive Dashboard
+ * Version: 2.0.0
+ *
+ * Handles:
+ * - Search and filtering
+ * - Row click interactions
+ * - Sidebar detail loading
+ * - Counter animations
+ * - Smooth UI transitions
  */
-jQuery(function($) {
+
+(function($) {
   'use strict';
 
-  var $wrapper = $('.pi-jobs-page');
-  if (!$wrapper.length) return;
+  const JobsDashboard = {
 
-  // ─── Mobile data-labels ───
-  var headers = [];
-  $wrapper.find('.pi-table thead th').each(function() {
-    headers.push($(this).text().trim());
-  });
-  $wrapper.find('.pi-table tbody tr').each(function() {
-    $(this).find('td').each(function(i) {
-      if (headers[i]) $(this).attr('data-label', headers[i]);
-    });
-  });
+    $wrapper: null,
+    $searchInput: null,
+    $filterBar: null,
+    $filterBtn: null,
+    $filterOptions: null,
+    $tableBody: null,
+    $sidebar: null,
+    $sidebarEmpty: null,
+    $sidebarContent: null,
+    currentFilter: 'all',
+    currentJobId: null,
 
-  // ─── Stat counter animation ───
-  var countersAnimated = false;
+    init: function() {
+      this.$wrapper = $('.pi-jobs-wrapper');
 
-  function animateCounters() {
-    if (countersAnimated) return;
-    countersAnimated = true;
-
-    $wrapper.find('.pi-jobs-stat-value[data-count]').each(function() {
-      var $el = $(this);
-      var target = parseInt($el.data('count'), 10) || 0;
-      if (target === 0) { $el.text('0'); return; }
-
-      var duration = 600;
-      var start = performance.now();
-
-      function step(now) {
-        var elapsed = now - start;
-        var progress = Math.min(elapsed / duration, 1);
-        // ease-out cubic
-        var ease = 1 - Math.pow(1 - progress, 3);
-        $el.text(Math.round(target * ease));
-        if (progress < 1) requestAnimationFrame(step);
+      if (!this.$wrapper.length) {
+        return;
       }
+
+      this.cacheElements();
+      this.bindEvents();
+      this.animateStats();
+      this.animateProgressBars();
+    },
+
+    cacheElements: function() {
+      this.$searchInput = $('#pi-jobs-search-input');
+      this.$filterBar = $('#pi-jobs-filter-bar');
+      this.$filterBtn = $('#pi-jobs-filter-btn');
+      this.$filterOptions = $('.pi-jobs-filter-option');
+      this.$tableBody = $('.pi-jobs-table tbody');
+      this.$sidebar = $('#pi-jobs-sidebar');
+      this.$sidebarEmpty = $('#pi-jobs-sidebar-empty');
+      this.$sidebarContent = $('#pi-jobs-sidebar-content');
+    },
+
+    bindEvents: function() {
+      this.$searchInput.on('input', this.handleSearch.bind(this));
+      this.$filterBtn.on('click', this.toggleFilterBar.bind(this));
+      this.$filterOptions.on('click', this.handleFilterChange.bind(this));
+      this.$tableBody.on('click', 'tr[data-job-id]', this.handleRowClick.bind(this));
+    },
+
+    toggleFilterBar: function(e) {
+      e.preventDefault();
+      this.$filterBar.slideToggle(200);
+    },
+
+    handleSearch: function() {
+      const searchTerm = this.$searchInput.val().toLowerCase();
+      this.applyFilters(searchTerm, this.currentFilter);
+    },
+
+    handleFilterChange: function(e) {
+      const $btn = $(e.currentTarget);
+      const filter = $btn.data('filter');
+
+      this.$filterOptions.removeClass('active');
+      $btn.addClass('active');
+
+      this.currentFilter = filter;
+
+      const searchTerm = this.$searchInput.val().toLowerCase();
+      this.applyFilters(searchTerm, filter);
+    },
+
+    applyFilters: function(searchTerm, statusFilter) {
+      let visibleCount = 0;
+
+      this.$tableBody.find('tr[data-job-id]').each(function() {
+        const $row = $(this);
+        const rowText = $row.text().toLowerCase();
+        const $badge = $row.find('.pi-jobs-badge');
+        const status = $badge.length ? $badge.text().trim().toLowerCase() : '';
+
+        const matchesSearch = !searchTerm || rowText.indexOf(searchTerm) !== -1;
+        const matchesFilter = statusFilter === 'all' || status === statusFilter;
+
+        if (matchesSearch && matchesFilter) {
+          $row.show();
+          visibleCount++;
+        } else {
+          $row.hide();
+        }
+      });
+
+      if (visibleCount === 0 && this.$tableBody.find('tr').length > 0) {
+        this.showNoResults();
+      } else {
+        this.hideNoResults();
+      }
+    },
+
+    showNoResults: function() {
+      const $table = $('.pi-jobs-table-card');
+      if (!$table.find('.pi-jobs-no-results').length) {
+        const noResultsHtml =
+          '<div class="pi-jobs-no-results" style="padding: 60px 32px; text-align: center;">' +
+            '<svg style="width: 48px; height: 48px; color: var(--pi-gray-300); stroke-width: 1.5; margin: 0 auto 12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">' +
+              '<circle cx="11" cy="11" r="8"/>' +
+              '<path d="m21 21-4.35-4.35"/>' +
+            '</svg>' +
+            '<p style="font-size: 14px; color: var(--pi-gray-500); margin: 0;">No jobs match your search criteria.</p>' +
+          '</div>';
+
+        $('.pi-jobs-table-wrapper').after(noResultsHtml);
+      }
+      $('.pi-jobs-table-wrapper').hide();
+      $('.pi-jobs-no-results').show();
+    },
+
+    hideNoResults: function() {
+      $('.pi-jobs-table-wrapper').show();
+      $('.pi-jobs-no-results').remove();
+    },
+
+    handleRowClick: function(e) {
+      const $row = $(e.currentTarget);
+      const jobId = $row.data('job-id');
+
+      if (!jobId) {
+        return;
+      }
+
+      this.$tableBody.find('tr').removeClass('pi-jobs-row-selected');
+      $row.addClass('pi-jobs-row-selected');
+
+      this.currentJobId = jobId;
+      this.loadJobDetails(jobId);
+    },
+
+    loadJobDetails: function(jobId) {
+      if (!window.PI_Jobs || !PI_Jobs.rest_base) {
+        return;
+      }
+
+      const url = PI_Jobs.rest_base.replace(/\/+$/, '') + '/' + jobId;
+
+      this.$sidebarEmpty.hide();
+      this.$sidebarContent.show().html(this.getLoadingHTML());
+
+      fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-WP-Nonce': PI_Jobs.nonce || ''
+        }
+      })
+      .then(response => response.json())
+      .then(data => {
+        this.renderJobDetails(data);
+      })
+      .catch(error => {
+        console.error('Error loading job details:', error);
+        this.$sidebarContent.html(
+          '<div style="padding: 24px; text-align: center; color: var(--pi-gray-500);">' +
+            '<p>Unable to load job details.</p>' +
+          '</div>'
+        );
+      });
+    },
+
+    getLoadingHTML: function() {
+      return '<div style="padding: 24px; text-align: center; color: var(--pi-gray-400);">' +
+               '<p>Loading job details...</p>' +
+             '</div>';
+    },
+
+    renderJobDetails: function(job) {
+      if (!job || !job.id) {
+        this.$sidebarContent.hide();
+        this.$sidebarEmpty.show();
+        return;
+      }
+
+      const statusLabel = job.status ? this.capitalizeFirst(job.status) : 'Planning';
+      const progress = Math.max(0, Math.min(100, parseInt(job.progress, 10) || 0));
+
+      const html =
+        '<div class="pi-jobs-detail-section">' +
+          '<div class="pi-jobs-detail-header">' +
+            '<h3 class="pi-jobs-detail-title">Job Overview</h3>' +
+            '<span class="pi-jobs-detail-code-badge">' + this.escapeHtml(job.code || 'JOB-' + job.id) + '</span>' +
+          '</div>' +
+          '<div class="pi-jobs-detail-progress">' +
+            '<div class="pi-jobs-progress-ring" style="--progress: ' + progress + ';">' +
+              '<span class="pi-jobs-progress-value">' + progress + '%</span>' +
+            '</div>' +
+            '<div class="pi-jobs-progress-info">' +
+              '<div class="pi-jobs-progress-label">Overall Progress</div>' +
+              '<div class="pi-jobs-progress-desc">Track on-site delivery and completion</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="pi-jobs-detail-grid">' +
+            '<div class="pi-jobs-detail-item">' +
+              '<div class="pi-jobs-detail-label">Client</div>' +
+              '<div class="pi-jobs-detail-value">' + this.escapeHtml(job.customer_name || '—') + '</div>' +
+            '</div>' +
+            '<div class="pi-jobs-detail-item">' +
+              '<div class="pi-jobs-detail-label">Status</div>' +
+              '<div class="pi-jobs-detail-value">' +
+                '<span class="pi-jobs-badge pi-jobs-badge-' + (job.status || 'planning') + '">' +
+                  statusLabel +
+                '</span>' +
+              '</div>' +
+            '</div>' +
+            '<div class="pi-jobs-detail-item">' +
+              '<div class="pi-jobs-detail-label">Start Date</div>' +
+              '<div class="pi-jobs-detail-value">' + this.escapeHtml(job.start_date || '—') + '</div>' +
+            '</div>' +
+            '<div class="pi-jobs-detail-item">' +
+              '<div class="pi-jobs-detail-label">Target Finish</div>' +
+              '<div class="pi-jobs-detail-value">' + this.escapeHtml(job.end_date || '—') + '</div>' +
+            '</div>' +
+            '<div class="pi-jobs-detail-item full-width">' +
+              '<div class="pi-jobs-detail-label">Site Address</div>' +
+              '<div class="pi-jobs-detail-value">' + this.escapeHtml(job.site_address || '—') + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pi-jobs-detail-section">' +
+          '<h3 class="pi-jobs-detail-title">Activity Timeline</h3>' +
+          this.renderTimeline(job.activity || []) +
+        '</div>';
+
+      this.$sidebarContent.html(html);
+    },
+
+    renderTimeline: function(activity) {
+      if (!Array.isArray(activity) || activity.length === 0) {
+        return '<div style="padding: 16px; text-align: center; color: var(--pi-gray-400); font-size: 13px;">' +
+                 '<p>No activity recorded yet.</p>' +
+               '</div>';
+      }
+
+      let html = '<div class="pi-jobs-timeline">';
+
+      activity.slice().reverse().forEach(entry => {
+        const parts = String(entry).split(': ');
+        const timestamp = parts.shift() || '';
+        const text = parts.join(': ') || entry;
+
+        html +=
+          '<div class="pi-jobs-timeline-item">' +
+            '<div class="pi-jobs-timeline-dot"></div>' +
+            '<div class="pi-jobs-timeline-meta">' + this.escapeHtml(timestamp) + '</div>' +
+            '<div class="pi-jobs-timeline-text">' + this.escapeHtml(text) + '</div>' +
+          '</div>';
+      });
+
+      html += '</div>';
+      return html;
+    },
+
+    animateStats: function() {
+      const $statValues = $('.pi-jobs-stat-value[data-count]');
+
+      if (!$statValues.length) {
+        return;
+      }
+
+      const observer = new IntersectionObserver(
+        entries => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              this.animateCounter($(entry.target));
+              observer.unobserve(entry.target);
+            }
+          });
+        },
+        { threshold: 0.3 }
+      );
+
+      $statValues.each(function() {
+        observer.observe(this);
+      });
+    },
+
+    animateCounter: function($element) {
+      const target = parseInt($element.data('count'), 10) || 0;
+
+      if (target === 0) {
+        $element.text('0');
+        return;
+      }
+
+      const duration = 800;
+      const start = performance.now();
+
+      const step = now => {
+        const elapsed = now - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+
+        $element.text(Math.round(target * easeOut));
+
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        }
+      };
 
       requestAnimationFrame(step);
-    });
-  }
+    },
 
-  // Use IntersectionObserver if available, else animate immediately
-  if ('IntersectionObserver' in window) {
-    var statsGrid = $wrapper.find('.pi-jobs-stats-grid')[0];
-    if (statsGrid) {
-      var obs = new IntersectionObserver(function(entries) {
-        if (entries[0].isIntersecting) {
-          animateCounters();
-          obs.disconnect();
-        }
-      }, { threshold: 0.3 });
-      obs.observe(statsGrid);
+    animateProgressBars: function() {
+      const $fills = $('.pi-jobs-progress-fill');
+
+      $fills.each(function() {
+        const $fill = $(this);
+        const targetWidth = $fill[0].style.width;
+
+        $fill.css('width', '0%');
+
+        setTimeout(() => {
+          $fill.css('width', targetWidth);
+        }, 100);
+      });
+    },
+
+    capitalizeFirst: function(str) {
+      if (!str) return '';
+      return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+    },
+
+    escapeHtml: function(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
-  } else {
-    animateCounters();
-  }
+  };
 
-  // ─── Search & Filter Toolbar ───
-  var $card = $wrapper.find('.pi-card').first();
-  var $tableBody = $card.find('.pi-table tbody');
-
-  var toolbarHtml =
-    '<div class="pi-jobs-toolbar">' +
-      '<div class="pi-jobs-search">' +
-        '<svg class="pi-jobs-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' +
-        '<input type="text" id="pi-jobs-search" placeholder="Search jobs…" autocomplete="off" />' +
-      '</div>' +
-      '<div class="pi-jobs-filter-btns">' +
-        '<button class="pi-jobs-filter-btn active" data-filter="all" type="button">All</button>' +
-        '<button class="pi-jobs-filter-btn" data-filter="planning" type="button">Planning</button>' +
-        '<button class="pi-jobs-filter-btn" data-filter="active" type="button">Active</button>' +
-        '<button class="pi-jobs-filter-btn" data-filter="completed" type="button">Completed</button>' +
-      '</div>' +
-    '</div>';
-
-  $card.find('.pi-card-header').after(toolbarHtml);
-
-  // No-results element
-  var noResultsHtml =
-    '<div class="pi-jobs-no-results" style="display:none;">' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' +
-      '<span>No jobs match your search.</span>' +
-    '</div>';
-  $card.find('.pi-table-wrapper').after(noResultsHtml);
-  var $noResults = $card.find('.pi-jobs-no-results');
-
-  var currentFilter = 'all';
-
-  function applyFilters() {
-    var searchVal = $('#pi-jobs-search').val().toLowerCase();
-    var visible = 0;
-
-    $tableBody.find('tr').each(function() {
-      var $row = $(this);
-      var text = $row.text().toLowerCase();
-      var status = '';
-      var $badge = $row.find('.pi-badge');
-      if ($badge.length) status = $badge.text().trim().toLowerCase();
-
-      var matchesSearch = !searchVal || text.indexOf(searchVal) > -1;
-      var matchesFilter = currentFilter === 'all' || status === currentFilter;
-
-      if (matchesSearch && matchesFilter) {
-        $row.show();
-        visible++;
-      } else {
-        $row.hide();
-      }
-    });
-
-    // Show/hide no-results message
-    if ($tableBody.find('tr').length > 0) {
-      if (visible === 0) {
-        $noResults.show();
-        $card.find('.pi-table-wrapper').hide();
-      } else {
-        $noResults.hide();
-        $card.find('.pi-table-wrapper').show();
-      }
-    }
-  }
-
-  $('#pi-jobs-search').on('input', function() {
-    applyFilters();
+  $(document).ready(function() {
+    JobsDashboard.init();
   });
 
-  $(document).on('click', '.pi-jobs-filter-btn', function() {
-    $('.pi-jobs-filter-btn').removeClass('active');
-    $(this).addClass('active');
-    currentFilter = $(this).data('filter');
-    applyFilters();
-  });
-
-  // ─── Progress bar animation ───
-  $wrapper.find('.pi-progress-bar-fill').each(function() {
-    var $fill = $(this);
-    var targetWidth = $fill[0].style.width;
-    $fill.css('width', '0%');
-    setTimeout(function() {
-      $fill.css('width', targetWidth);
-    }, 400);
-  });
-
-  // ─── Row hover + details sidebar ───
-  $tableBody.find('tr').css('cursor', 'pointer');
-
-  function renderJobDetails(job) {
-    var $card = $('#pi-jobs-detail-card');
-    var $empty = $card.find('.pi-jobs-detail-empty');
-    var $content = $card.find('.pi-jobs-detail-content');
-
-    if (!job || !job.id) {
-      $content.hide().empty();
-      $empty.show();
-      $('#pi-jobs-timeline').html('<div class="pi-jobs-timeline-empty"><span>No job selected.</span></div>');
-      return;
-    }
-
-    $empty.hide();
-
-    var statusLabel = job.status ? job.status.charAt(0).toUpperCase() + job.status.slice(1) : 'Planning';
-    var progress = parseInt(job.progress || 0, 10);
-    if (progress < 0 || isNaN(progress)) progress = 0;
-    if (progress > 100) progress = 100;
-
-    var start = job.start_date || '—';
-    var end = job.end_date || '—';
-    var customer = job.customer_name || '—';
-    var address = job.site_address || '—';
-
-    var detailHtml =
-      '<div class="pi-jobs-detail-heading">' +
-        '<span class="pi-jobs-detail-code">' + String(job.code || ('JOB-' + job.id)) + '</span>' +
-        '<span class="pi-jobs-detail-status">' +
-          '<span class="pi-badge pi-badge-status-' + (job.status || 'planning') + '">' + statusLabel + '</span>' +
-        '</span>' +
-      '</div>' +
-      '<div class="pi-jobs-detail-progress-ring" style="grid-column: 1 / -1;">' +
-        '<div class="pi-jobs-detail-progress-meter" style="--pi-progress:' + progress + ';">' +
-          '<span class="pi-jobs-detail-progress-value">' + progress + '%</span>' +
-        '</div>' +
-        '<div class="pi-jobs-detail-progress-copy">' +
-          '<span>Overall progress</span>' +
-          '<span>Track on-site delivery and completion.</span>' +
-        '</div>' +
-      '</div>' +
-      '<div>' +
-        '<div class="pi-jobs-detail-grid-label">Customer</div>' +
-        '<div class="pi-jobs-detail-grid-value">' + customer + '</div>' +
-      '</div>' +
-      '<div>' +
-        '<div class="pi-jobs-detail-grid-label">Status</div>' +
-        '<div class="pi-jobs-detail-grid-value">' + statusLabel + '</div>' +
-      '</div>' +
-      '<div>' +
-        '<div class="pi-jobs-detail-grid-label">Start date</div>' +
-        '<div class="pi-jobs-detail-grid-value">' + start + '</div>' +
-      '</div>' +
-      '<div>' +
-        '<div class="pi-jobs-detail-grid-label">Target finish</div>' +
-        '<div class="pi-jobs-detail-grid-value">' + end + '</div>' +
-      '</div>' +
-      '<div class="pi-jobs-detail-address">' +
-        '<div class="pi-jobs-detail-grid-label">Site address</div>' +
-        '<div class="pi-jobs-detail-grid-value">' + address + '</div>' +
-      '</div>';
-
-    $content.html(detailHtml).show();
-
-    // Timeline
-    var $timeline = $('#pi-jobs-timeline');
-    var activity = Array.isArray(job.activity) ? job.activity : [];
-    if (!activity.length) {
-      $timeline.html('<div class="pi-jobs-timeline-empty"><span>No activity recorded yet.</span></div>');
-      return;
-    }
-
-    var itemsHtml = '<ul class="pi-jobs-timeline-list">';
-    activity.slice().reverse().forEach(function(entry) {
-      var parts = String(entry).split(': ');
-      var ts = parts.shift() || '';
-      var text = parts.join(': ') || entry;
-      itemsHtml +=
-        '<li class="pi-jobs-timeline-item">' +
-          '<div class="pi-jobs-timeline-dot"></div>' +
-          '<div class="pi-jobs-timeline-meta">' + ts + '</div>' +
-          '<div class="pi-jobs-timeline-text">' + text + '</div>' +
-        '</li>';
-    });
-    itemsHtml += '</ul>';
-    $timeline.html(itemsHtml);
-  }
-
-  function loadJobDetails(jobId) {
-    if (!window.PI_Jobs || !PI_Jobs.rest_base) {
-      return;
-    }
-    var url = PI_Jobs.rest_base.replace(/\/+$/, '') + '/' + encodeURIComponent(jobId);
-
-    // Simple loading state
-    $('#pi-jobs-detail-card .pi-jobs-detail-empty').hide();
-    $('#pi-jobs-detail-card .pi-jobs-detail-content')
-      .show()
-      .html('<div class="pi-jobs-detail-grid-label">Loading job details…</div>');
-    $('#pi-jobs-timeline').html('<div class="pi-jobs-timeline-empty"><span>Loading activity…</span></div>');
-
-    fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-WP-Nonce': PI_Jobs.nonce || ''
-      }
-    }).then(function(res) {
-      return res.json();
-    }).then(function(data) {
-      renderJobDetails(data || {});
-    }).catch(function() {
-      $('#pi-jobs-timeline').html('<div class="pi-jobs-timeline-empty"><span>Unable to load job activity.</span></div>');
-    });
-  }
-
-  $tableBody.on('click', 'tr[data-job-id]', function() {
-    var id = $(this).data('job-id');
-    if (!id) return;
-    $tableBody.find('tr').removeClass('pi-jobs-row-selected');
-    $(this).addClass('pi-jobs-row-selected');
-    loadJobDetails(id);
-  });
-});
-
+})(jQuery);

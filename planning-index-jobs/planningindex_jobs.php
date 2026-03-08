@@ -2,7 +2,7 @@
 /**
  * Plugin Name: PlanningIndex Jobs
  * Description: Job management for PlanningIndex CRM – convert won leads into jobs, track status, dates, workers, and progress.
- * Version: 1.0.0
+ * Version: 2.0.0
  * Author: Planning Index
  */
 
@@ -13,9 +13,6 @@ if (!defined('ABSPATH')) {
 define('PI_JOB_CPT', 'pi_job');
 define('PI_JOB_META_PREFIX', '_pi_job_');
 
-/**
- * Register the Job custom post type.
- */
 function pi_jobs_register_post_type() {
     $labels = [
         'name'               => __('Jobs', 'planningindex'),
@@ -46,7 +43,6 @@ function pi_jobs_register_post_type() {
 
     register_post_type(PI_JOB_CPT, $args);
 
-    // Ensure basic caps exist for subscribers and admins to edit their own jobs if needed.
     $subscriber = get_role('subscriber');
     if ($subscriber && !$subscriber->has_cap('edit_pi_job')) {
         $subscriber->add_cap('edit_pi_job');
@@ -58,18 +54,12 @@ function pi_jobs_register_post_type() {
 }
 add_action('init', 'pi_jobs_register_post_type');
 
-/**
- * Activation: register CPT and flush rewrites.
- */
 function pi_jobs_activate() {
     pi_jobs_register_post_type();
     flush_rewrite_rules();
 }
 register_activation_hook(__FILE__, 'pi_jobs_activate');
 
-/**
- * Generate a sequential job code like JOB-YYYYMM-001.
- */
 function pi_jobs_generate_job_code() {
     $year_month = date('Ym');
     $option_key = 'pi_job_seq_' . $year_month;
@@ -80,9 +70,6 @@ function pi_jobs_generate_job_code() {
     return $code;
 }
 
-/**
- * Helper: title case helper if not already defined (mirrors workspace helper).
- */
 if (!function_exists('pi_jobs_title_case_address')) {
     function pi_jobs_title_case_address($s) {
         $s = (string) $s;
@@ -96,23 +83,12 @@ if (!function_exists('pi_jobs_title_case_address')) {
     }
 }
 
-/**
- * Create a Job post from a lead when the stage becomes "won".
- *
- * Hooked into the existing workspace action: pi_lead_stage_changed.
- *
- * @param int    $lead_id   Lead post ID.
- * @param int    $user_id   Owner user ID.
- * @param string $old_stage Previous stage.
- * @param string $new_stage New stage.
- */
 function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_stage) {
     if ($new_stage !== 'won') {
         return;
     }
 
     if (!defined('PI_LEAD_CPT') || !defined('PI_LEAD_META_PREFIX')) {
-        // Workspace plugin not active.
         return;
     }
 
@@ -120,13 +96,11 @@ function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_st
         return;
     }
 
-    // Only allow the owner to generate jobs.
     $owner_id = (int) get_post_meta($lead_id, PI_LEAD_META_PREFIX . 'owner_user_id', true);
     if ($owner_id !== (int) $user_id) {
         return;
     }
 
-    // Avoid duplicate jobs for the same lead.
     $existing = get_posts([
         'post_type'      => PI_JOB_CPT,
         'posts_per_page' => 1,
@@ -139,7 +113,6 @@ function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_st
         return;
     }
 
-    // Gather planning application context from linked planning_app (if any).
     $planning_app_id = (int) get_post_meta($lead_id, PI_LEAD_META_PREFIX . 'linked_planning_app_id', true);
     $site_address    = '';
     $description     = '';
@@ -173,7 +146,6 @@ function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_st
         $date_received = $meta['date_received'][0] ?? '';
     }
 
-    // Derive customer name if available on lead.
     $customer_name = get_post_meta($lead_id, PI_LEAD_META_PREFIX . 'customer_name', true);
 
     $job_code = pi_jobs_generate_job_code();
@@ -194,7 +166,7 @@ function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_st
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'lead_id', $lead_id);
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'owner_user_id', $owner_id);
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'planning_app_id', $planning_app_id);
-    update_post_meta($job_id, PI_JOB_META_PREFIX . 'status', 'planning'); // planning, active, completed
+    update_post_meta($job_id, PI_JOB_META_PREFIX . 'status', 'planning');
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'site_address', $site_address);
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'description', $description);
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'council_reference', $council_ref);
@@ -212,18 +184,12 @@ function pi_jobs_convert_won_lead_to_job($lead_id, $user_id, $old_stage, $new_st
 }
 add_action('pi_lead_stage_changed', 'pi_jobs_convert_won_lead_to_job', 10, 4);
 
-/**
- * Helper to ensure the current user owns a job.
- */
 function pi_jobs_user_owns_job($job_id, $user_id = null) {
     $user_id = $user_id ? (int) $user_id : get_current_user_id();
     $owner   = (int) get_post_meta($job_id, PI_JOB_META_PREFIX . 'owner_user_id', true);
     return $owner === $user_id;
 }
 
-/**
- * Append an item to the job activity timeline.
- */
 function pi_jobs_add_activity($job_id, $message) {
     $activity = get_post_meta($job_id, PI_JOB_META_PREFIX . 'activity', true);
     if (!is_array($activity)) {
@@ -233,13 +199,9 @@ function pi_jobs_add_activity($job_id, $message) {
     update_post_meta($job_id, PI_JOB_META_PREFIX . 'activity', $activity);
 }
 
-/**
- * REST API: Jobs endpoints.
- */
 add_action('rest_api_init', function () {
     $namespace = 'pi/v1';
 
-    // GET /pi/v1/jobs - list jobs for current user.
     register_rest_route($namespace, '/jobs', [
         'methods'             => 'GET',
         'permission_callback' => static function () {
@@ -298,7 +260,6 @@ add_action('rest_api_init', function () {
         },
     ]);
 
-    // GET /pi/v1/jobs/{id} - single job details.
     register_rest_route($namespace, '/jobs/(?P<id>\d+)', [
         'methods'             => 'GET',
         'permission_callback' => static function (WP_REST_Request $req) {
@@ -349,7 +310,6 @@ add_action('rest_api_init', function () {
         },
     ]);
 
-    // POST /pi/v1/jobs/{id}/update - update job fields.
     register_rest_route($namespace, '/jobs/(?P<id>\d+)/update', [
         'methods'             => 'POST',
         'permission_callback' => static function (WP_REST_Request $req) {
@@ -388,7 +348,6 @@ add_action('rest_api_init', function () {
                 } elseif ($key === 'progress') {
                     $sanitized = max(0, min(100, (int) $value));
                 } elseif ($key === 'notes') {
-                    // Notes are appended into activity timeline.
                     $note = sanitize_textarea_field((string) $value);
                     if ($note !== '') {
                         pi_jobs_add_activity($job_id, 'Note: ' . $note);
@@ -418,7 +377,6 @@ add_action('rest_api_init', function () {
         },
     ]);
 
-    // POST /pi/v1/jobs/from_lead - explicitly create a job from a lead (optional helper).
     register_rest_route($namespace, '/jobs/from_lead', [
         'methods'             => 'POST',
         'permission_callback' => static function () {
@@ -439,10 +397,8 @@ add_action('rest_api_init', function () {
                 return new WP_Error('forbidden', 'Not your lead', ['status' => 403]);
             }
 
-            // If stage isn't already won, allow opt-in creation but log in activity.
             $stage = get_post_meta($lead_id, PI_LEAD_META_PREFIX . 'stage', true);
 
-            // Reuse conversion logic but ensure we only run once.
             $existing = get_posts([
                 'post_type'      => PI_JOB_CPT,
                 'posts_per_page' => 1,
@@ -459,7 +415,6 @@ add_action('rest_api_init', function () {
                 ]);
             }
 
-            // Temporarily call the same converter (simulating a won stage).
             pi_jobs_convert_won_lead_to_job($lead_id, $owner_id, (string) $stage, 'won');
 
             $jobs = get_posts([
@@ -483,28 +438,20 @@ add_action('rest_api_init', function () {
     ]);
 });
 
-/**
- * Shortcode: [planningindex_jobs]
- *
- * Renders a lightweight job dashboard using existing CRM styles.
- */
 function pi_jobs_shortcode() {
     if (!is_user_logged_in()) {
-        return '<div class="pi-crm-wrapper">
-            <div class="pi-auth-required">
-                <div class="pi-auth-icon">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                    </svg>
-                </div>
+        return '<div class="pi-jobs-wrapper">
+            <div class="pi-jobs-auth-required">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
                 <h3>Sign In Required</h3>
-                <p>Please log in to view and manage your jobs.</p>
+                <p>Please log in to view and manage your construction jobs.</p>
             </div>
         </div>';
     }
 
-    // Reuse existing Inter font + workspace styling for perfect visual consistency.
     wp_enqueue_style(
         'google-fonts-inter',
         'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
@@ -512,22 +459,20 @@ function pi_jobs_shortcode() {
         null
     );
 
-    // Plugin-specific CSS and JS (only when shortcode is rendered)
     wp_enqueue_style(
         'planningindex-jobs-style',
         plugin_dir_url(__FILE__) . 'assets/style.css',
         [],
-        '1.0.0'
+        '2.0.0'
     );
     wp_enqueue_script(
         'planningindex-jobs-script',
         plugin_dir_url(__FILE__) . 'assets/script.js',
         ['jquery'],
-        '1.0.0',
+        '2.0.0',
         true
     );
 
-    // Server-render jobs for the current user to avoid requiring extra JS.
     $user_id = get_current_user_id();
     $jobs    = get_posts([
         'post_type'      => PI_JOB_CPT,
@@ -541,8 +486,10 @@ function pi_jobs_shortcode() {
     $active_jobs  = 0;
     $completed    = 0;
     $planning_cnt = 0;
+    $overdue_cnt  = 0;
 
     $rows = [];
+    $today = strtotime('today');
 
     foreach ($jobs as $job) {
         $meta         = get_post_meta($job->ID);
@@ -552,6 +499,19 @@ function pi_jobs_shortcode() {
         $end_date     = $meta[PI_JOB_META_PREFIX . 'end_date'][0] ?? '';
         $site_address = $meta[PI_JOB_META_PREFIX . 'site_address'][0] ?? '';
         $customer     = $meta[PI_JOB_META_PREFIX . 'customer_name'][0] ?? '';
+        $workers_raw  = $meta[PI_JOB_META_PREFIX . 'assigned_workers'][0] ?? [];
+        $workers      = is_array($workers_raw) ? $workers_raw : maybe_unserialize($workers_raw);
+        if (!is_array($workers)) {
+            $workers = [];
+        }
+
+        $worker_names = [];
+        foreach ($workers as $wid) {
+            $u = get_user_by('id', (int) $wid);
+            if ($u) {
+                $worker_names[] = $u->display_name;
+            }
+        }
 
         if ($status === 'active') {
             $active_jobs++;
@@ -559,6 +519,13 @@ function pi_jobs_shortcode() {
             $completed++;
         } else {
             $planning_cnt++;
+        }
+
+        if ($end_date && $status !== 'completed') {
+            $end_ts = strtotime($end_date);
+            if ($end_ts && $end_ts < $today) {
+                $overdue_cnt++;
+            }
         }
 
         $rows[] = [
@@ -570,10 +537,10 @@ function pi_jobs_shortcode() {
             'end_date'     => $end_date,
             'site_address' => $site_address,
             'customer'     => $customer,
+            'workers'      => $worker_names,
         ];
     }
 
-    // Expose basic aggregates to JS for richer UI (no business logic changes).
     wp_localize_script(
         'planningindex-jobs-script',
         'PI_Jobs',
@@ -585,123 +552,168 @@ function pi_jobs_shortcode() {
                 'active'    => (int) $active_jobs,
                 'planning'  => (int) $planning_cnt,
                 'completed' => (int) $completed,
+                'overdue'   => (int) $overdue_cnt,
             ],
         ]
     );
 
     ob_start();
     ?>
-    <div class="pi-dashboard pi-crm-wrapper pi-jobs-page">
+    <div class="pi-jobs-wrapper">
+        <div class="pi-jobs-page">
 
-        <!-- Page Header -->
-        <div class="pi-jobs-header">
-            <div class="pi-jobs-header-left">
-                <div class="pi-jobs-header-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-                    </svg>
-                </div>
-                <div>
+            <div class="pi-jobs-header">
+                <div class="pi-jobs-header-content">
                     <h1>Jobs</h1>
-                    <p class="pi-jobs-header-sub"><?php echo esc_html($total_jobs); ?> job<?php echo $total_jobs !== 1 ? 's' : ''; ?> total</p>
+                    <p class="pi-jobs-header-subtitle">Manage active construction projects and deliveries</p>
                 </div>
-            </div>
-        </div>
-
-        <!-- Stats Grid -->
-        <div class="pi-jobs-stats-grid">
-            <div class="pi-jobs-stat-card pi-jobs-stat-total">
-                <div class="pi-jobs-stat-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-                </div>
-                <div class="pi-jobs-stat-content">
-                    <span class="pi-jobs-stat-value" data-count="<?php echo esc_attr($total_jobs); ?>">0</span>
-                    <span class="pi-jobs-stat-label">Total Jobs</span>
-                </div>
-            </div>
-            <div class="pi-jobs-stat-card pi-jobs-stat-active">
-                <div class="pi-jobs-stat-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                </div>
-                <div class="pi-jobs-stat-content">
-                    <span class="pi-jobs-stat-value" data-count="<?php echo esc_attr($active_jobs); ?>">0</span>
-                    <span class="pi-jobs-stat-label">Active</span>
-                </div>
-            </div>
-            <div class="pi-jobs-stat-card pi-jobs-stat-planning">
-                <div class="pi-jobs-stat-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <div class="pi-jobs-stat-content">
-                    <span class="pi-jobs-stat-value" data-count="<?php echo esc_attr($planning_cnt); ?>">0</span>
-                    <span class="pi-jobs-stat-label">Planning</span>
-                </div>
-            </div>
-            <div class="pi-jobs-stat-card pi-jobs-stat-completed">
-                <div class="pi-jobs-stat-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                </div>
-                <div class="pi-jobs-stat-content">
-                    <span class="pi-jobs-stat-value" data-count="<?php echo esc_attr($completed); ?>">0</span>
-                    <span class="pi-jobs-stat-label">Completed</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Layout: table + insights + sidebar -->
-        <div class="pi-jobs-layout">
-            <div class="pi-jobs-main">
-                <div class="pi-card pi-jobs-main-card">
-                    <div class="pi-card-header">
-                        <h2>Job Dashboard</h2>
-                        <p>Every won lead is automatically converted into a job for delivery tracking.</p>
+                <div class="pi-jobs-header-actions">
+                    <div class="pi-jobs-search-container">
+                        <svg class="pi-jobs-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.35-4.35"/>
+                        </svg>
+                        <input type="text" id="pi-jobs-search-input" class="pi-jobs-search-input" placeholder="Search jobs..." autocomplete="off">
                     </div>
-                    <div class="pi-card-body">
+                    <button class="pi-jobs-btn pi-jobs-btn-secondary" id="pi-jobs-filter-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="4" y1="6" x2="16" y2="6"/>
+                            <line x1="4" y1="12" x2="12" y2="12"/>
+                            <line x1="4" y1="18" x2="14" y2="18"/>
+                        </svg>
+                        Filters
+                    </button>
+                </div>
+            </div>
+
+            <div class="pi-jobs-stats">
+                <div class="pi-jobs-stat-card">
+                    <div class="pi-jobs-stat-icon pi-jobs-stat-icon-total">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+                        </svg>
+                    </div>
+                    <div class="pi-jobs-stat-content">
+                        <div class="pi-jobs-stat-value" data-count="<?php echo esc_attr($active_jobs); ?>"><?php echo esc_html($active_jobs); ?></div>
+                        <div class="pi-jobs-stat-label">Active Jobs</div>
+                    </div>
+                </div>
+
+                <div class="pi-jobs-stat-card">
+                    <div class="pi-jobs-stat-icon pi-jobs-stat-icon-scheduled">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                    </div>
+                    <div class="pi-jobs-stat-content">
+                        <div class="pi-jobs-stat-value" data-count="<?php echo esc_attr($planning_cnt); ?>"><?php echo esc_html($planning_cnt); ?></div>
+                        <div class="pi-jobs-stat-label">Scheduled</div>
+                    </div>
+                </div>
+
+                <div class="pi-jobs-stat-card">
+                    <div class="pi-jobs-stat-icon pi-jobs-stat-icon-completed">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                    </div>
+                    <div class="pi-jobs-stat-content">
+                        <div class="pi-jobs-stat-value" data-count="<?php echo esc_attr($completed); ?>"><?php echo esc_html($completed); ?></div>
+                        <div class="pi-jobs-stat-label">Completed</div>
+                    </div>
+                </div>
+
+                <div class="pi-jobs-stat-card">
+                    <div class="pi-jobs-stat-icon pi-jobs-stat-icon-overdue">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                    </div>
+                    <div class="pi-jobs-stat-content">
+                        <div class="pi-jobs-stat-value" data-count="<?php echo esc_attr($overdue_cnt); ?>"><?php echo esc_html($overdue_cnt); ?></div>
+                        <div class="pi-jobs-stat-label">Overdue</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pi-jobs-filter-bar" id="pi-jobs-filter-bar" style="display:none;">
+                <div class="pi-jobs-filter-group">
+                    <label class="pi-jobs-filter-label">Status</label>
+                    <div class="pi-jobs-filter-options">
+                        <button class="pi-jobs-filter-option active" data-filter="all" type="button">All</button>
+                        <button class="pi-jobs-filter-option" data-filter="active" type="button">Active</button>
+                        <button class="pi-jobs-filter-option" data-filter="planning" type="button">Scheduled</button>
+                        <button class="pi-jobs-filter-option" data-filter="completed" type="button">Completed</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pi-jobs-layout">
+                <div class="pi-jobs-main">
+                    <div class="pi-jobs-table-card">
                         <?php if (empty($rows)) : ?>
-                            <div class="pi-empty-state">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <div class="pi-jobs-empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                                     <line x1="8" y1="12" x2="16" y2="12"/>
                                     <line x1="12" y1="8" x2="12" y2="16"/>
                                 </svg>
-                                <span>No jobs yet. Move a lead to <strong>Won</strong> to create a job.</span>
+                                <h3>No Jobs Yet</h3>
+                                <p>Jobs are automatically created when you move a lead to Won status in your CRM.</p>
                             </div>
                         <?php else : ?>
-                            <div class="pi-table-wrapper">
-                                <table class="pi-table pi-table-striped">
+                            <div class="pi-jobs-table-wrapper">
+                                <table class="pi-jobs-table">
                                     <thead>
                                         <tr>
-                                            <th>Job</th>
+                                            <th>Job Reference</th>
+                                            <th>Client</th>
+                                            <th>Location</th>
                                             <th>Status</th>
-                                            <th>Customer</th>
-                                            <th>Site Address</th>
-                                            <th>Start</th>
-                                            <th>Finish</th>
                                             <th>Progress</th>
+                                            <th>Start Date</th>
+                                            <th>Target Finish</th>
+                                            <th>Crew</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach ($rows as $row) : ?>
-                                            <tr data-job-id="<?php echo esc_attr($row['id']); ?>">
-                                                <td>
-                                                    <strong><?php echo esc_html($row['code']); ?></strong>
+                                            <tr class="pi-jobs-table-row" data-job-id="<?php echo esc_attr($row['id']); ?>">
+                                                <td data-label="Job">
+                                                    <div class="pi-jobs-code"><?php echo esc_html($row['code']); ?></div>
                                                 </td>
-                                                <td>
-                                                    <span class="pi-badge pi-badge-status-<?php echo esc_attr($row['status']); ?>">
+                                                <td data-label="Client">
+                                                    <div class="pi-jobs-client"><?php echo esc_html($row['customer'] ?: '—'); ?></div>
+                                                </td>
+                                                <td data-label="Location">
+                                                    <div class="pi-jobs-location"><?php echo esc_html($row['site_address'] ?: '—'); ?></div>
+                                                </td>
+                                                <td data-label="Status">
+                                                    <span class="pi-jobs-badge pi-jobs-badge-<?php echo esc_attr($row['status']); ?>">
                                                         <?php echo esc_html(ucfirst($row['status'])); ?>
                                                     </span>
                                                 </td>
-                                                <td><?php echo esc_html($row['customer'] ?: '—'); ?></td>
-                                                <td class="pi-jobs-address-cell"><?php echo esc_html($row['site_address'] ?: '—'); ?></td>
-                                                <td><?php echo esc_html($row['start_date'] ?: '—'); ?></td>
-                                                <td><?php echo esc_html($row['end_date'] ?: '—'); ?></td>
-                                                <td>
-                                                    <div class="pi-progress-inline">
-                                                        <div class="pi-progress-bar">
-                                                            <div class="pi-progress-bar-fill" style="width: <?php echo esc_attr($row['progress']); ?>%;"></div>
+                                                <td data-label="Progress">
+                                                    <div class="pi-jobs-progress-cell">
+                                                        <div class="pi-jobs-progress-bar">
+                                                            <div class="pi-jobs-progress-fill" style="width: <?php echo esc_attr($row['progress']); ?>%;"></div>
                                                         </div>
-                                                        <span class="pi-progress-label"><?php echo esc_html($row['progress']); ?>%</span>
+                                                        <span class="pi-jobs-progress-text"><?php echo esc_html($row['progress']); ?>%</span>
                                                     </div>
+                                                </td>
+                                                <td data-label="Start"><?php echo esc_html($row['start_date'] ?: '—'); ?></td>
+                                                <td data-label="Finish"><?php echo esc_html($row['end_date'] ?: '—'); ?></td>
+                                                <td data-label="Crew">
+                                                    <?php if (!empty($row['workers'])) : ?>
+                                                        <div class="pi-jobs-crew"><?php echo esc_html(implode(', ', array_slice($row['workers'], 0, 2))); ?><?php echo count($row['workers']) > 2 ? '...' : ''; ?></div>
+                                                    <?php else : ?>
+                                                        <span class="pi-jobs-empty-value">—</span>
+                                                    <?php endif; ?>
                                                 </td>
                                             </tr>
                                         <?php endforeach; ?>
@@ -711,41 +723,25 @@ function pi_jobs_shortcode() {
                         <?php endif; ?>
                     </div>
                 </div>
+
+                <aside class="pi-jobs-sidebar" id="pi-jobs-sidebar">
+                    <div class="pi-jobs-sidebar-card">
+                        <div class="pi-jobs-sidebar-empty" id="pi-jobs-sidebar-empty">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 8v4"/>
+                                <path d="M12 16h.01"/>
+                            </svg>
+                            <h4>Select a Job</h4>
+                            <p>Click any job row to view detailed information, timeline, and activity.</p>
+                        </div>
+
+                        <div class="pi-jobs-sidebar-content" id="pi-jobs-sidebar-content" style="display:none;">
+                        </div>
+                    </div>
+                </aside>
             </div>
 
-            <aside class="pi-jobs-sidebar">
-                <div class="pi-card pi-jobs-sidebar-card" id="pi-jobs-detail-card">
-                    <div class="pi-card-header">
-                        <h2>Job Details</h2>
-                        <p class="pi-jobs-detail-sub">Select a job from the table to see more.</p>
-                    </div>
-                    <div class="pi-card-body">
-                        <div class="pi-jobs-detail-empty">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><circle cx="12" cy="16" r="0.5"/>
-                            </svg>
-                            <p>Click any job row to view status, dates, and progress timeline.</p>
-                        </div>
-                        <div class="pi-jobs-detail-content" style="display:none;">
-                            <!-- Filled dynamically via JS from REST API -->
-                        </div>
-                    </div>
-                </div>
-
-                <div class="pi-card pi-jobs-sidebar-card">
-                    <div class="pi-card-header">
-                        <h2>Activity Timeline</h2>
-                        <p class="pi-jobs-detail-sub">Latest updates from the selected job.</p>
-                    </div>
-                    <div class="pi-card-body">
-                        <div class="pi-jobs-timeline" id="pi-jobs-timeline">
-                            <div class="pi-jobs-timeline-empty">
-                                <span>No job selected.</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
         </div>
     </div>
     <?php
@@ -753,4 +749,3 @@ function pi_jobs_shortcode() {
     return ob_get_clean();
 }
 add_shortcode('planningindex_jobs', 'pi_jobs_shortcode');
-
